@@ -322,6 +322,7 @@ describe('waiting for the end of an engine v2 run', () => {
 			});
 			const executionId = createExecutionIdV2();
 			const watch = await Container.get(EngineV2ExecutionCompletions).watch(executionId);
+			onTestFinished(() => watch.stop());
 
 			await manualRun(undefined, executionId);
 
