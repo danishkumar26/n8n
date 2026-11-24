@@ -28,9 +28,10 @@ import InstanceAiAppBlueprint from './InstanceAiAppBlueprint.vue';
 import InstanceAiMcpConnect from './InstanceAiMcpConnect.vue';
 import PreferenceCard from './PreferenceCard.vue';
 import TaskChecklist from './TaskChecklist.vue';
-import ThinkingBlock from './ThinkingBlock.vue';
 import TimelineActivityIndicator from './TimelineActivityIndicator.vue';
 import TimelineTextSegment from './TimelineTextSegment.vue';
+import { AiActivityTrace } from '../../shared/components/AiActivityTrace';
+import { useInstanceAiActivityItems } from '../composables/useInstanceAiActivityItems';
 
 const i18n = useI18n();
 const thread = useThread();
@@ -120,6 +121,8 @@ const canActOnPreferenceCard = computed(
 const preferencesEnabled = computed(() => isContextPreferencesEnabled());
 
 const timelineEntries = computed(() => props.visibleEntries ?? props.agentNode.timeline);
+
+const { activityItems } = useInstanceAiActivityItems(() => props.agentNode);
 
 /** Index tool calls by ID for O(1) lookup and proper reactivity tracking. */
 const toolCallsById = computed(() => {
@@ -321,15 +324,17 @@ function resolveAppBlueprint(tc: InstanceAiToolCallState): AppBlueprint | undefi
 			</div>
 			<template v-else>
 				<template v-for="block in [group.block]" :key="block.key">
-					<!-- Collapsible thinking trace: reasoning + narration + tool calls -->
-					<template v-if="block.type === 'thinking'">
-						<ThinkingBlock
-							:agent-node="props.agentNode"
-							:entries="block.entries"
-							:active="block.active"
-							:awaiting-input="block.active && thread.isAwaitingConfirmation"
-						/>
-					</template>
+					<!-- Thinking, then the tool calls and notices of the block -->
+					<AiActivityTrace
+						v-if="block.type === 'thinking'"
+						:items="
+							activityItems({
+								entries: block.entries,
+								active: block.active,
+								awaitingInput: block.active && thread.isAwaitingConfirmation,
+							})
+						"
+					/>
 
 					<TaskChecklist v-else-if="block.type === 'tasks'" :tasks="props.agentNode.tasks" />
 
