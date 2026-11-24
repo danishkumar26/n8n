@@ -2,10 +2,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
 	IMAGES,
+	LINES,
 	buildReport,
+	parseTags,
 	renderSummary,
-	resolveChannel,
+	resolveVersion,
 	statusOf,
+	versionsOf,
 } from './base-image-report.mjs';
 
 const finding = (id, severity = 'HIGH', pkg = 'zlib') => ({
@@ -164,47 +167,81 @@ describe('buildReport', () => {
 	});
 });
 
-describe('resolveChannel', () => {
-	const snapshot = (version, image = 'multi') => ({
-		digest: 'sha256:a',
-		image:
-			image === 'multi'
-				? { 'linux/amd64': { config: { Labels: { 'org.opencontainers.image.version': version } } } }
-				: { config: { Labels: { 'org.opencontainers.image.version': version } } },
-	});
-	const sameDigest = () => 'sha256:a';
-
-	it('reads the version label of a multi-platform image', () => {
-		const inspect = () => snapshot('2.48.8');
-		assert.equal(resolveChannel('stable', { inspect, resolve: sameDigest }), '2.48.8');
-	});
-
-	it('reads the version label of a single-platform image', () => {
-		const inspect = () => snapshot('2.49.5', 'single');
-		assert.equal(resolveChannel('beta', { inspect, resolve: sameDigest }), '2.49.5');
-	});
-
-	it('fails without a release version label', () => {
-		const inspect = () => snapshot('v3-nightly');
-		assert.throws(
-			() => resolveChannel('v3-rc', { inspect, resolve: sameDigest }),
-			/no release version label/,
+describe('parseTags', () => {
+	it('maps each tag to its commit, and an annotated tag to the commit it points to', () => {
+		const tags = parseTags(
+			[
+				'aaa\trefs/tags/stable',
+				'aaa\trefs/tags/n8n@2.49.5',
+				'ttt\trefs/tags/n8n@3.4.0',
+				'ccc\trefs/tags/n8n@3.4.0^{}',
+				'',
+			].join('\n'),
+		);
+		assert.deepEqual(
+			[...tags],
+			[
+				['stable', 'aaa'],
+				['n8n@2.49.5', 'aaa'],
+				['n8n@3.4.0', 'ccc'],
+			],
 		);
 	});
+});
 
-	it('compares the version tag with the digest of the same inspection', () => {
-		const inspect = () => snapshot('2.48.8');
-		const resolve = (ref) => (ref.endsWith(':2.48.8') ? 'sha256:b' : 'sha256:a');
-		assert.throws(() => resolveChannel('stable', { inspect, resolve }), /is not the image of/);
-		const resolved = [];
-		resolveChannel('stable', {
-			inspect,
-			resolve: (ref) => {
-				resolved.push(ref);
-				return 'sha256:a';
-			},
-		});
-		assert.deepEqual(resolved, ['n8nio/n8n:2.48.8']);
+describe('versionsOf', () => {
+	const tags = new Map([
+		['stable', 'c1'],
+		['n8n@2.49.5', 'c1'],
+		['n8n@2.50.0', 'c2'],
+		['n8n@3.3.0', 'c3'],
+		['n8n@3.10.0', 'c4'],
+		['n8n@3.4.0', 'c5'],
+		['n8n@3.5.0-rc.1', 'c6'],
+		['v3-rc', 'c6'],
+	]);
+
+	it('gives the version tag on the commit of a track tag', () => {
+		assert.deepEqual(versionsOf(LINES[0], tags), ['2.49.5']);
+	});
+
+	it('gives the release versions of a major, the newest first', () => {
+		const v3 = LINES.find((line) => line.line === 'v3');
+		assert.deepEqual(versionsOf(v3, tags), ['3.10.0', '3.4.0', '3.3.0']);
+	});
+
+	it('fails when the track tag does not exist', () => {
+		assert.throws(
+			() => versionsOf({ line: 'beta', track: 'beta' }, tags),
+			/beta tag does not exist/,
+		);
+	});
+});
+
+describe('resolveVersion', () => {
+	const tags = new Map([
+		['stable', 'c1'],
+		['n8n@2.49.5', 'c1'],
+		['n8n@3.3.0', 'c3'],
+		['n8n@3.4.0', 'c4'],
+	]);
+	const stable = { line: 'stable', track: 'stable' };
+	const v3 = { line: 'v3', major: 3 };
+	const labels = (map) => (ref) => map[ref] ?? null;
+
+	it('returns the version when the image has the same version label', () => {
+		const label = labels({ 'n8nio/n8n:2.49.5': '2.49.5' });
+		assert.equal(resolveVersion(stable, tags, { label }), '2.49.5');
+	});
+
+	it('fails when the image of a track version has another label', () => {
+		const label = labels({ 'n8nio/n8n:2.49.5': 'v3-nightly' });
+		assert.throws(() => resolveVersion(stable, tags, { label }), /matching version label/);
+	});
+
+	it('falls back to the version before a new tag without an image', () => {
+		const label = labels({ 'n8nio/n8n:3.3.0': '3.3.0' });
+		assert.equal(resolveVersion(v3, tags, { label }), '3.3.0');
 	});
 });
 

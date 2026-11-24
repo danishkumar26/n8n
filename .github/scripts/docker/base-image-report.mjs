@@ -2,14 +2,14 @@
 /**
  * Writes the public Trivy report of the released images.
  *
- * The script resolves each release line (a channel tag on Docker Hub) to its
- * version, then scans each variant of that version and the nightly image of the
- * same variant for fixable OS findings, on each platform. Each High or Critical
+ * The script resolves each release line to its version from the Git tags, then
+ * scans each variant of that version and the nightly image of the same variant
+ * for fixable OS findings, on each platform. Each High or Critical
  * finding gets the status of its fix (see statusOf), from the result of the
  * refresh run in base-image-candidates.mjs.
  *
  * Usage: node base-image-report.mjs --candidates <json> --out <dir>
- * Needs docker buildx and trivy. Writes one JSON for each image to --out, and
+ * Needs git, docker buildx and trivy. Writes one JSON for each image to --out, and
  * a summary to $GITHUB_STEP_SUMMARY.
  */
 
@@ -32,14 +32,19 @@ import { PLATFORMS, scan } from './base-image-candidates.mjs';
 import { resolveDigest } from './base-image-chain-pr.mjs';
 
 /**
- * The release lines: a channel tag on Docker Hub, and the nightly tag of the
- * branch that the line comes from. v3 ships only as Docker images, so its line
- * goes here when it has a release channel.
+ * The release lines, and the nightly tag of the branch that each line comes
+ * from. `track` is the Git tag that the release workflow moves to the version
+ * of the line. v3 has no track tag, so its line is the newest 3.x version.
+ * v1 is not here: the refresh does not update the 1.x branch, and v1 support
+ * ends on 2027-01-31.
  */
 export const LINES = [
-	{ line: 'stable', channel: 'stable', nightly: 'nightly' },
-	{ line: 'beta', channel: 'beta', nightly: 'nightly' },
+	{ line: 'stable', track: 'stable', nightly: 'nightly' },
+	{ line: 'beta', track: 'beta', nightly: 'nightly' },
+	{ line: 'v3', major: 3, nightly: 'v3-nightly' },
 ];
+
+const VERSION_TAG = /^n8n@(\d+)\.(\d+)\.(\d+)$/;
 
 /** The variants of a release, and the pins in docker/docker-bake.hcl that bring their OS packages. */
 export const IMAGES = [
@@ -158,36 +163,72 @@ export function renderSummary(reports) {
 	return `${lines.join('\n')}\n`;
 }
 
-/**
- * Reads the version label of a channel image, and checks that the version tag
- * has the same digest. One inspection gives both, so a channel that moves
- * during the run cannot mix two images.
- */
-export function resolveChannel(channel, { inspect = inspectImage, resolve = resolveDigest } = {}) {
-	const ref = `n8nio/n8n:${channel}`;
-	const { digest, image } = inspect(ref);
-	// A multi-platform image maps each platform to its config.
-	const config = image.config ?? Object.values(image)[0]?.config;
-	const version = config?.Labels?.['org.opencontainers.image.version'];
-	if (!/^\d+\.\d+\.\d+$/.test(version ?? '')) {
-		throw new Error(`${ref} has no release version label (found ${version})`);
+/** Reads `git ls-remote --tags` output into a map of tag name to commit. */
+export function parseTags(output) {
+	const tags = new Map();
+	const peeled = new Map();
+	for (const row of output.split('\n')) {
+		const [sha, ref] = row.split('\t');
+		if (!ref?.startsWith('refs/tags/')) continue;
+		const name = ref.slice('refs/tags/'.length);
+		// An annotated tag also lists the commit that it points to as `<name>^{}`.
+		if (name.endsWith('^{}')) peeled.set(name.slice(0, -3), sha);
+		else tags.set(name, sha);
 	}
-	if (resolve(`n8nio/n8n:${version}`) !== digest) {
-		throw new Error(`n8nio/n8n:${version} is not the image of ${ref}`);
-	}
-	return version;
+	for (const [name, sha] of peeled) tags.set(name, sha);
+	return tags;
 }
 
-function inspectImage(ref) {
-	const out = execFileSync(
-		'docker',
-		['buildx', 'imagetools', 'inspect', ref, '--format', '{{json .}}'],
-		{
-			encoding: 'utf8',
-		},
-	);
-	const { manifest, image } = JSON.parse(out);
-	return { digest: manifest.digest, image };
+/** The versions of a line, the newest first. */
+export function versionsOf(line, tags) {
+	const commit = line.track ? tags.get(line.track) : undefined;
+	if (line.track && !commit) throw new Error(`the ${line.track} tag does not exist`);
+	const versions = [];
+	for (const [name, sha] of tags) {
+		const match = VERSION_TAG.exec(name);
+		if (!match) continue;
+		const parts = match.slice(1).map(Number);
+		if (line.track ? sha === commit : parts[0] === line.major) versions.push(parts);
+	}
+	if (versions.length === 0) throw new Error(`no version tag matches the ${line.line} line`);
+	return versions
+		.sort((a, b) => b[0] - a[0] || b[1] - a[1] || b[2] - a[2])
+		.map((parts) => parts.join('.'));
+}
+
+/**
+ * The newest version of a line that has a released image. The version label of
+ * the image must match the tag. A new tag can come before its image, so a line
+ * without a track tag can fall back to the version before it.
+ */
+export function resolveVersion(line, tags, { label = imageVersion } = {}) {
+	const versions = versionsOf(line, tags).slice(0, line.track ? 1 : 2);
+	for (const version of versions) {
+		if (label(`n8nio/n8n:${version}`) === version) return version;
+	}
+	throw new Error(`no image of ${versions.join(' or ')} has the matching version label`);
+}
+
+/** The version label of an image, or null when the tag does not exist. */
+function imageVersion(ref) {
+	let out;
+	try {
+		out = execFileSync(
+			'docker',
+			['buildx', 'imagetools', 'inspect', ref, '--format', '{{json .}}'],
+			{
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'pipe'],
+			},
+		);
+	} catch (error) {
+		if (/: not found\b/.test(String(error.stderr ?? ''))) return null;
+		throw error;
+	}
+	const { image } = JSON.parse(out);
+	// A multi-platform image maps each platform to its config.
+	const config = image.config ?? Object.values(image).find((entry) => entry?.config)?.config;
+	return config?.Labels?.['org.opencontainers.image.version'] ?? null;
 }
 
 async function main() {
@@ -202,6 +243,9 @@ async function main() {
 	const runUrl = `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`;
 	const trivy = execFileSync('trivy', ['--version', '--format', 'json'], { encoding: 'utf8' });
 	const scannedAt = new Date().toISOString();
+	const tags = parseTags(
+		execFileSync('git', ['ls-remote', '--tags', 'origin'], { encoding: 'utf8' }),
+	);
 
 	mkdirSync(values.out, { recursive: true });
 	const workDir = mkdtempSync(path.join(tmpdir(), 'base-image-report-'));
@@ -212,7 +256,7 @@ async function main() {
 			// A line without a release version must not stop the report of the other lines.
 			let version;
 			try {
-				version = resolveChannel(line.channel);
+				version = resolveVersion(line, tags);
 			} catch (error) {
 				console.log(`::warning::Skipped the ${line.line} line: ${error.message}`);
 				skipped.push(`${line.line}: ${error.message}`);
