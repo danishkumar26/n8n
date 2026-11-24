@@ -2,7 +2,7 @@ import { Logger } from '@n8n/backend-common';
 import { Container } from '@n8n/di';
 import type { BinaryData } from 'n8n-core';
 import { BinaryDataConfig, BinaryDataService, TEMP_EXECUTION_ID } from 'n8n-core';
-import type { IBinaryData, IRun, WorkflowExecuteMode } from 'n8n-workflow';
+import type { IBinaryData, IRun, IRunData, WorkflowExecuteMode } from 'n8n-workflow';
 
 import { DatabaseManager } from '@/binary-data/database.manager';
 
@@ -65,9 +65,9 @@ function collectRenameEntries(run: IRun, executionId: string): RenameEntry[] {
 
 const DATABASE_ID_PREFIX = 'database:';
 
-/** File IDs of the binaries in `run` that the database manager stores, without duplicates. */
-function collectDatabaseFileIds(run: IRun): string[] {
-	const fileIds = Object.values(run.data.resultData.runData)
+/** File IDs of the binaries in `runData` that the database manager stores, without duplicates. */
+export function collectDatabaseFileIds(runData: IRunData): string[] {
+	const fileIds = Object.values(runData)
 		.flatMap((nodeRuns) => nodeRuns ?? [])
 		.flatMap((nodeRun) => nodeRun.data?.main ?? [])
 		.flatMap((outputs) => outputs ?? [])
@@ -87,7 +87,7 @@ function collectDatabaseFileIds(run: IRun): string[] {
  */
 export async function assignDatabaseFilesToExecution(run: IRun, executionId: string) {
 	try {
-		const fileIds = collectDatabaseFileIds(run);
+		const fileIds = collectDatabaseFileIds(run.data.resultData.runData);
 
 		if (fileIds.length > 0) {
 			await Container.get(DatabaseManager).assignToExecution(fileIds, executionId);
