@@ -1,4 +1,5 @@
 import { LicenseState } from '@n8n/backend-common';
+import { ProjectMutationHooksProxy } from '@n8n/backend-services';
 import type { ModuleInterface } from '@n8n/decorators';
 import { BackendModule } from '@n8n/decorators';
 import { Container } from '@n8n/di';
@@ -21,6 +22,13 @@ export class ExecutionLimitsModule implements ModuleInterface {
 		const { ExecutionLimitsSnapshot } = await import('./execution-limits-snapshot.js');
 		await Container.get(ExecutionLimitsSnapshot).start();
 
+		Container.get(ProjectMutationHooksProxy).registerProvider({
+			afterTeamProjectCreated: async (projectId) => {
+				const { ExecutionLimitsService } = await import('./execution-limits.service.js');
+				await Container.get(ExecutionLimitsService).applyDefaultLimitToNewProject(projectId);
+			},
+		});
+
 		// A worker does not admit runs, so it needs no usage.
 		const { InstanceSettings } = await import('n8n-core');
 		const { instanceType } = Container.get(InstanceSettings);
@@ -31,12 +39,18 @@ export class ExecutionLimitsModule implements ModuleInterface {
 	}
 
 	async entities() {
+		const { ExecutionLimitAudit } = await import('./execution-limit-audit.entity.js');
 		const { ExecutionLimitInstanceUsage } = await import(
 			'./execution-limit-instance-usage.entity.js'
 		);
 		const { ExecutionLimitUsage } = await import('./execution-limit-usage.entity.js');
 		const { ProjectExecutionLimit } = await import('./project-execution-limit.entity.js');
 
-		return [ProjectExecutionLimit, ExecutionLimitUsage, ExecutionLimitInstanceUsage];
+		return [
+			ProjectExecutionLimit,
+			ExecutionLimitUsage,
+			ExecutionLimitInstanceUsage,
+			ExecutionLimitAudit,
+		];
 	}
 }

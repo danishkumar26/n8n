@@ -6,6 +6,7 @@ import { Container } from '@n8n/di';
 import { DataSource } from '@n8n/typeorm';
 import { InstanceSettings } from 'n8n-core';
 
+import { ExecutionLimitAudit } from '../execution-limit-audit.entity';
 import { ExecutionLimitInstanceUsage } from '../execution-limit-instance-usage.entity';
 import { ExecutionLimitUsage } from '../execution-limit-usage.entity';
 import { ExecutionUsageCache } from '../execution-usage-cache';
@@ -83,13 +84,14 @@ describe('ExecutionLimitsModule', () => {
 		expect(onInitDone).toHaveBeenCalledTimes(1);
 	});
 
-	it('owns the project limit entity and the two usage entities', async () => {
+	it('owns the project limit entity, the two usage entities and the audit entity', async () => {
 		const module = new ExecutionLimitsModule();
 
 		expect(await module.entities()).toEqual([
 			ProjectExecutionLimit,
 			ExecutionLimitUsage,
 			ExecutionLimitInstanceUsage,
+			ExecutionLimitAudit,
 		]);
 	});
 });

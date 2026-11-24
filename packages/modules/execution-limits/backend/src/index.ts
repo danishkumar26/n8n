@@ -3,3 +3,4 @@ export type { ExecutionLimitsEventMap } from './execution-limits.events';
 export type { ExecutionLimitsMetricsEventMap } from './execution-limits-metrics.events';
 export type { UsagePeriod } from './execution-usage-period';
 export type { ExecutionUsage, UsageScope } from './execution-usage';
+export { ExecutionLimitsService } from './execution-limits.service';
