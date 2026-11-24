@@ -158,17 +158,21 @@ export function renderSummary(reports) {
 	return `${lines.join('\n')}\n`;
 }
 
-/** Reads the version label of an image, and checks that the version tag has the same digest. */
+/**
+ * Reads the version label of a channel image, and checks that the version tag
+ * has the same digest. One inspection gives both, so a channel that moves
+ * during the run cannot mix two images.
+ */
 export function resolveChannel(channel, { inspect = inspectImage, resolve = resolveDigest } = {}) {
 	const ref = `n8nio/n8n:${channel}`;
-	const image = inspect(ref);
+	const { digest, image } = inspect(ref);
 	// A multi-platform image maps each platform to its config.
 	const config = image.config ?? Object.values(image)[0]?.config;
 	const version = config?.Labels?.['org.opencontainers.image.version'];
 	if (!/^\d+\.\d+\.\d+$/.test(version ?? '')) {
 		throw new Error(`${ref} has no release version label (found ${version})`);
 	}
-	if (resolve(`n8nio/n8n:${version}`) !== resolve(ref)) {
+	if (resolve(`n8nio/n8n:${version}`) !== digest) {
 		throw new Error(`n8nio/n8n:${version} is not the image of ${ref}`);
 	}
 	return version;
@@ -177,12 +181,13 @@ export function resolveChannel(channel, { inspect = inspectImage, resolve = reso
 function inspectImage(ref) {
 	const out = execFileSync(
 		'docker',
-		['buildx', 'imagetools', 'inspect', ref, '--format', '{{json .Image}}'],
+		['buildx', 'imagetools', 'inspect', ref, '--format', '{{json .}}'],
 		{
 			encoding: 'utf8',
 		},
 	);
-	return JSON.parse(out);
+	const { manifest, image } = JSON.parse(out);
+	return { digest: manifest.digest, image };
 }
 
 async function main() {

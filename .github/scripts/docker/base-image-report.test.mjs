@@ -165,31 +165,46 @@ describe('buildReport', () => {
 });
 
 describe('resolveChannel', () => {
-	const labels = (version) => ({ Labels: { 'org.opencontainers.image.version': version } });
+	const snapshot = (version, image = 'multi') => ({
+		digest: 'sha256:a',
+		image:
+			image === 'multi'
+				? { 'linux/amd64': { config: { Labels: { 'org.opencontainers.image.version': version } } } }
+				: { config: { Labels: { 'org.opencontainers.image.version': version } } },
+	});
 	const sameDigest = () => 'sha256:a';
 
 	it('reads the version label of a multi-platform image', () => {
-		const inspect = () => ({ 'linux/amd64': { config: labels('2.48.8') } });
+		const inspect = () => snapshot('2.48.8');
 		assert.equal(resolveChannel('stable', { inspect, resolve: sameDigest }), '2.48.8');
 	});
 
 	it('reads the version label of a single-platform image', () => {
-		const inspect = () => ({ config: labels('2.49.5') });
+		const inspect = () => snapshot('2.49.5', 'single');
 		assert.equal(resolveChannel('beta', { inspect, resolve: sameDigest }), '2.49.5');
 	});
 
 	it('fails without a release version label', () => {
-		const inspect = () => ({ config: labels('v3-nightly') });
+		const inspect = () => snapshot('v3-nightly');
 		assert.throws(
 			() => resolveChannel('v3-rc', { inspect, resolve: sameDigest }),
 			/no release version label/,
 		);
 	});
 
-	it('fails when the version tag is another image', () => {
-		const inspect = () => ({ config: labels('2.48.8') });
-		const resolve = (ref) => (ref.endsWith(':stable') ? 'sha256:a' : 'sha256:b');
+	it('compares the version tag with the digest of the same inspection', () => {
+		const inspect = () => snapshot('2.48.8');
+		const resolve = (ref) => (ref.endsWith(':2.48.8') ? 'sha256:b' : 'sha256:a');
 		assert.throws(() => resolveChannel('stable', { inspect, resolve }), /is not the image of/);
+		const resolved = [];
+		resolveChannel('stable', {
+			inspect,
+			resolve: (ref) => {
+				resolved.push(ref);
+				return 'sha256:a';
+			},
+		});
+		assert.deepEqual(resolved, ['n8nio/n8n:2.48.8']);
 	});
 });
 

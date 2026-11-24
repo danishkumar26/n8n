@@ -295,7 +295,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           node .github/scripts/slack/notify.mjs --channel '#updates-security' \
-            --text "<${RUN_URL}|The Trivy report of the released images failed>. Check the job summary for the skipped lines."
+            --text "<${RUN_URL}|The Trivy report of the released images failed>. Check which steps of the run completed."
 
   chain:
     name: Pin the images that master published
