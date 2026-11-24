@@ -39,13 +39,16 @@ function writeFile(filePath: string, content: string) {
 	writeFileSync(filePath, content);
 }
 
-const nodeSource = (className: string, name: string) => `
+const nodeSource = (className: string, name: string) => nodeSourceWithName(className, `'${name}'`);
+
+/** A node whose description `name` is the given expression */
+const nodeSourceWithName = (className: string, nameExpression: string) => `
 import type { INodeType, INodeTypeDescription } from 'n8n-workflow';
 
 export class ${className} implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: '${className}',
-		name: '${name}',
+		name: ${nameExpression},
 		group: ['transform'],
 		version: 1,
 		inputs: [],
@@ -153,6 +156,34 @@ ruleTester.run('codex-node-name', CodexNodeNameRule, {
 				code,
 			};
 		})(),
+		(() => {
+			const code = codex('n8n-nodes-luma.anything');
+			const file = createPackage('n8n-nodes-luma', ['dist/nodes/Luma/Luma.node.js'], {
+				'nodes/Luma/Luma.node.ts': nodeSourceWithName('Luma', '123'),
+				'nodes/Luma/Luma.node.json': code,
+			});
+			return {
+				name: 'only the package prefix is checked when the name is not a string',
+				filename: file('nodes/Luma/Luma.node.json'),
+				code,
+			};
+		})(),
+		(() => {
+			const code = codex('n8n-nodes-luma.lumaTrigger');
+			const file = createPackage(
+				'n8n-nodes-luma',
+				['dist/nodes/LumaTrigger/LumaTrigger.node.cjs'],
+				{
+					'dist/nodes/LumaTrigger/LumaTrigger.node.cjs': compiledNode('LumaTrigger', 'lumaTrigger'),
+					'dist/nodes/LumaTrigger/LumaTrigger.node.json': code,
+				},
+			);
+			return {
+				name: 'node registered with a .cjs extension',
+				filename: file('dist/nodes/LumaTrigger/LumaTrigger.node.json'),
+				code,
+			};
+		})(),
 		{
 			name: 'unrelated JSON file',
 			filename: 'package.json',
@@ -160,6 +191,38 @@ ruleTester.run('codex-node-name', CodexNodeNameRule, {
 		},
 	],
 	invalid: [
+		(() => {
+			const code = codex('n8n-nodes-luma');
+			const file = createPackage('n8n-nodes-luma', ['dist/nodes/Luma/Luma.node.js'], {
+				'nodes/Luma/Luma.node.ts': nodeSourceWithName('Luma', '123'),
+				'nodes/Luma/Luma.node.json': code,
+			});
+			return {
+				name: 'package name only when the name is not a string',
+				filename: file('nodes/Luma/Luma.node.json'),
+				code,
+				errors: [{ messageId: 'wrongNode' as const }],
+				output: null,
+			};
+		})(),
+		(() => {
+			const code = codex('n8n-nodes-luma');
+			const file = createPackage(
+				'n8n-nodes-luma',
+				['dist/nodes/LumaTrigger/LumaTrigger.node.cjs'],
+				{
+					'dist/nodes/LumaTrigger/LumaTrigger.node.cjs': compiledNode('LumaTrigger', 'lumaTrigger'),
+					'dist/nodes/LumaTrigger/LumaTrigger.node.json': code,
+				},
+			);
+			return {
+				name: 'package name only for a node registered with a .cjs extension',
+				filename: file('dist/nodes/LumaTrigger/LumaTrigger.node.json'),
+				code,
+				errors: [{ messageId: 'wrongNode' as const }],
+				output: codex('n8n-nodes-luma.lumaTrigger'),
+			};
+		})(),
 		{
 			name: 'package name only',
 			...lumaPackage('n8n-nodes-luma', 'n8n-nodes-luma').trigger,

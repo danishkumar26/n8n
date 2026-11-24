@@ -136,7 +136,7 @@ function findRegisteredNodeFile(
 		const sourcePath = registeredPath.replace(/^dist\//, '');
 		const isThisCodex = [registeredPath, sourcePath].some(
 			(candidate) =>
-				path.resolve(safeJoinPath(packageDir, candidate.replace(/\.(js|ts)$/, '.json'))) === codex,
+				path.resolve(safeJoinPath(packageDir, candidate.replace(/\.[^./]+$/, '.json'))) === codex,
 		);
 		if (isThisCodex) {
 			return nodeFiles.get(registeredPath) ?? null;

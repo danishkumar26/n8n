@@ -12,7 +12,7 @@ The `node` field in a node's `.node.json` codex file identifies the node it desc
 
 The rule follows how n8n finds a codex: it takes each file in `n8n.nodes` in `package.json`, reads the node's `name` from its description, and checks the `.node.json` next to it. In a source checkout it reads the TypeScript source instead of the compiled file. It can fix the value. A codex that belongs to no registered node is skipped, and when the node file is missing or its `name` isn't a plain string, the rule only checks that the value starts with the package name and a dot.
 
-For example, with `"nodes": ["dist/nodes/LumaTrigger/LumaTrigger.node.js"]` in a package named `n8n-nodes-luma`, and `name: 'lumaTrigger'` in the node's description, `LumaTrigger.node.json` needs `"node": "n8n-nodes-luma.lumaTrigger"`.
+For example, with `"n8n": { "nodes": ["dist/nodes/LumaTrigger/LumaTrigger.node.js"] }` in a package named `n8n-nodes-luma`, and `name: 'lumaTrigger'` in the node's description, `LumaTrigger.node.json` needs `"node": "n8n-nodes-luma.lumaTrigger"`.
 
 See [codex files](https://docs.n8n.io/connect/create-nodes/build-your-node/reference/codex-files).
 
