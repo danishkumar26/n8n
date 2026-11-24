@@ -59,7 +59,20 @@ export const CodexNodeNameRule = createRule({
 				const property = findJsonProperty(root, 'node');
 
 				if (!property) {
-					context.report({ node: root, messageId: 'missingNode', data: { expected } });
+					const field = `"node": ${JSON.stringify(expected)}`;
+					context.report({
+						node: root,
+						messageId: 'missingNode',
+						data: { expected },
+						// Adds the field right after the opening brace
+						fix: nodeName
+							? (fixer) =>
+									fixer.insertTextAfterRange(
+										[root.range[0], root.range[0] + 1],
+										root.properties.length > 0 ? `${field},` : field,
+									)
+							: null,
+					});
 					return;
 				}
 

@@ -199,7 +199,35 @@ ruleTester.run('codex-node-name', CodexNodeNameRule, {
 			name: 'missing node field',
 			...lumaPackage(undefined, undefined).trigger,
 			errors: [{ messageId: 'missingNode', data: { expected: 'n8n-nodes-luma.lumaTrigger' } }],
+			output: '{"node": "n8n-nodes-luma.lumaTrigger"}',
 		},
+		(() => {
+			const code = '{"categories":["Development"]}';
+			const file = createPackage('n8n-nodes-luma', ['dist/nodes/Luma/Luma.node.js'], {
+				'nodes/Luma/Luma.node.ts': nodeSource('Luma', 'luma'),
+				'nodes/Luma/Luma.node.json': code,
+			});
+			return {
+				name: 'missing node field next to other fields',
+				filename: file('nodes/Luma/Luma.node.json'),
+				code,
+				errors: [{ messageId: 'missingNode' as const }],
+				output: '{"node": "n8n-nodes-luma.luma","categories":["Development"]}',
+			};
+		})(),
+		(() => {
+			const code = codex();
+			const file = createPackage('n8n-nodes-luma', ['dist/nodes/Luma/Luma.node.js'], {
+				'nodes/Luma/Luma.node.json': code,
+			});
+			return {
+				name: 'missing node field when the node file is missing',
+				filename: file('nodes/Luma/Luma.node.json'),
+				code,
+				errors: [{ messageId: 'missingNode' as const }],
+				output: null,
+			};
+		})(),
 		(() => {
 			const code = codex('n8n-nodes-luma');
 			const file = createPackage('n8n-nodes-luma', ['dist/nodes/Luma/Luma.node.js'], {
