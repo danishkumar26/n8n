@@ -1,12 +1,15 @@
 import type { TSESTree } from '@typescript-eslint/typescript-estree';
 import { AST_NODE_TYPES, parse, simpleTraverse } from '@typescript-eslint/typescript-estree';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 import {
 	createRule,
 	findJsonProperty,
 	findPackageJson,
 	getTopLevelObjectInJson,
+	readPackageJsonRegisteredFiles,
+	safeJoinPath,
 } from '../utils/index.js';
 
 export const CodexNodeNameRule = createRule({
@@ -39,12 +42,19 @@ export const CodexNodeNameRule = createRule({
 					return;
 				}
 
-				const packageName = readPackageName(context.filename);
-				if (!packageName) {
+				const packageJsonPath = findPackageJson(context.filename);
+				const packageName = packageJsonPath ? readPackageName(packageJsonPath) : null;
+				if (!packageJsonPath || !packageName) {
 					return;
 				}
 
-				const nodeName = findNodeName(context.filename);
+				// n8n only reads the codex of a node registered in "n8n.nodes"
+				const nodeFile = findRegisteredNodeFile(packageJsonPath, context.filename);
+				if (nodeFile === undefined) {
+					return;
+				}
+
+				const nodeName = nodeFile ? findNodeName(nodeFile) : null;
 				const expected = `${packageName}.${nodeName ?? '<node-name>'}`;
 				const property = findJsonProperty(root, 'node');
 
@@ -79,12 +89,7 @@ export const CodexNodeNameRule = createRule({
 	},
 });
 
-function readPackageName(codexPath: string): string | null {
-	const packageJsonPath = findPackageJson(codexPath);
-	if (!packageJsonPath) {
-		return null;
-	}
-
+function readPackageName(packageJsonPath: string): string | null {
 	try {
 		const { name } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { name?: unknown };
 		return typeof name === 'string' && name.length > 0 ? name : null;
@@ -94,16 +99,54 @@ function readPackageName(codexPath: string): string | null {
 }
 
 /**
- * Reads the node's `name` from the node file next to the codex: `Foo.node.ts`
- * in a source checkout, or `Foo.node.js` in a published package
+ * Finds the node in "n8n.nodes" that a codex file belongs to. n8n reads the
+ * codex next to the registered file (`dist/nodes/Foo/Foo.node.js` →
+ * `Foo.node.json`), and a source checkout keeps it next to the TypeScript
+ * source. Returns the node file on disk, `null` when the node is registered
+ * but its file is missing, or `undefined` when no registered node uses this
+ * codex
  */
-export function findNodeName(codexPath: string): string | null {
-	const base = codexPath.slice(0, -'.json'.length);
-	const nodeFile = [`${base}.ts`, `${base}.js`].find((candidate) => existsSync(candidate));
-	if (!nodeFile) {
-		return null;
-	}
+function findRegisteredNodeFile(
+	packageJsonPath: string,
+	codexPath: string,
+): string | null | undefined {
+	const packageDir = path.dirname(packageJsonPath);
+	const codex = path.resolve(codexPath);
+	const nodeFiles = new Map(
+		readPackageJsonRegisteredFiles(packageJsonPath).map(({ registeredPath, filePath }) => [
+			registeredPath,
+			filePath,
+		]),
+	);
 
+	for (const registeredPath of readRegisteredNodePaths(packageJsonPath)) {
+		const sourcePath = registeredPath.replace(/^dist\//, '');
+		const isThisCodex = [registeredPath, sourcePath].some(
+			(candidate) =>
+				path.resolve(safeJoinPath(packageDir, candidate.replace(/\.(js|ts)$/, '.json'))) === codex,
+		);
+		if (isThisCodex) {
+			return nodeFiles.get(registeredPath) ?? null;
+		}
+	}
+	return undefined;
+}
+
+function readRegisteredNodePaths(packageJsonPath: string): string[] {
+	try {
+		const { n8n } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
+			n8n?: { nodes?: unknown };
+		};
+		return Array.isArray(n8n?.nodes)
+			? n8n.nodes.filter((entry): entry is string => typeof entry === 'string')
+			: [];
+	} catch {
+		return [];
+	}
+}
+
+/** Reads the `name` from a node file's description */
+export function findNodeName(nodeFile: string): string | null {
 	let program: TSESTree.Program;
 	try {
 		program = parse(readFileSync(nodeFile, 'utf8'), { jsx: false });

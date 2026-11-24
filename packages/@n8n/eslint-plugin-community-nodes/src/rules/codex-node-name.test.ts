@@ -14,18 +14,24 @@ afterAll(() => {
 
 let packageCount = 0;
 
-/** Writes a package to disk and returns the path of its codex file */
-function createPackage(packageName: string, files: Record<string, string>): string {
+/**
+ * Writes a package to disk, since the rule reads "n8n.nodes" and the node
+ * files from there
+ */
+function createPackage(
+	packageName: string,
+	nodes: string[],
+	files: Record<string, string>,
+): (relativePath: string) => string {
 	const packageDir = join(fixturesDir, `package-${++packageCount}`);
-	writeFile(join(packageDir, 'package.json'), JSON.stringify({ name: packageName }));
-	let codexPath = '';
+	writeFile(
+		join(packageDir, 'package.json'),
+		JSON.stringify({ name: packageName, n8n: { nodes } }),
+	);
 	for (const [relativePath, content] of Object.entries(files)) {
 		writeFile(join(packageDir, relativePath), content);
-		if (relativePath.endsWith('.node.json')) {
-			codexPath = join(packageDir, relativePath);
-		}
 	}
-	return codexPath;
+	return (relativePath) => join(packageDir, relativePath);
 }
 
 function writeFile(filePath: string, content: string) {
@@ -33,127 +39,175 @@ function writeFile(filePath: string, content: string) {
 	writeFileSync(filePath, content);
 }
 
-const nodeSource = (name: string) => `
-export class Example {
-	description = {
-		displayName: 'Example',
+const nodeSource = (className: string, name: string) => `
+import type { INodeType, INodeTypeDescription } from 'n8n-workflow';
+
+export class ${className} implements INodeType {
+	description: INodeTypeDescription = {
+		displayName: '${className}',
 		name: '${name}',
+		group: ['transform'],
 		version: 1,
+		inputs: [],
+		outputs: ['main'],
 		properties: [],
 	};
 }
 `;
 
 /** `tsc` output for a node class */
-const compiledNode = (name: string) => `"use strict";
+const compiledNode = (className: string, name: string) => `"use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.Example = void 0;
-class Example {
+exports.${className} = void 0;
+class ${className} {
     constructor() {
         this.description = {
-            displayName: 'Example',
+            displayName: '${className}',
             name: '${name}',
             version: 1,
             properties: [],
         };
     }
 }
-exports.Example = Example;
+exports.${className} = ${className};
 `;
 
 const codex = (node?: string) => JSON.stringify(node === undefined ? {} : { node });
 
-/** A source package with the given codex `node` and node `name` */
-function sourceCodex(
-	node: string | undefined,
-	nodeName = 'example',
-	packageName = 'n8n-nodes-example',
-) {
-	const code = codex(node);
-	const filename = createPackage(packageName, {
-		'nodes/Example/Example.node.json': code,
-		'nodes/Example/Example.node.ts': nodeSource(nodeName),
-	});
-	return { filename, code };
+/**
+ * The Luma package from a source checkout: an action node and a trigger,
+ * registered by their compiled paths
+ */
+function lumaPackage(actionCodex?: string, triggerCodex?: string, packageName = 'n8n-nodes-luma') {
+	const file = createPackage(
+		packageName,
+		['dist/nodes/Luma/Luma.node.js', 'dist/nodes/LumaTrigger/LumaTrigger.node.js'],
+		{
+			'nodes/Luma/Luma.node.ts': nodeSource('Luma', 'luma'),
+			'nodes/Luma/Luma.node.json': codex(actionCodex),
+			'nodes/LumaTrigger/LumaTrigger.node.ts': nodeSource('LumaTrigger', 'lumaTrigger'),
+			'nodes/LumaTrigger/LumaTrigger.node.json': codex(triggerCodex),
+		},
+	);
+	return {
+		action: { filename: file('nodes/Luma/Luma.node.json'), code: codex(actionCodex) },
+		trigger: {
+			filename: file('nodes/LumaTrigger/LumaTrigger.node.json'),
+			code: codex(triggerCodex),
+		},
+	};
 }
 
 const ruleTester = new RuleTester();
 
 ruleTester.run('codex-node-name', CodexNodeNameRule, {
 	valid: [
-		{ name: 'package name and node name', ...sourceCodex('n8n-nodes-example.example') },
+		{
+			name: 'action node',
+			...lumaPackage('n8n-nodes-luma.luma', 'n8n-nodes-luma.lumaTrigger').action,
+		},
+		{
+			name: 'trigger node',
+			...lumaPackage('n8n-nodes-luma.luma', 'n8n-nodes-luma.lumaTrigger').trigger,
+		},
 		{
 			name: 'scoped package',
-			...sourceCodex('@acme/n8n-nodes-example.example', 'example', '@acme/n8n-nodes-example'),
-		},
-		{
-			name: 'trigger in the same package',
-			...sourceCodex('n8n-nodes-example.exampleTrigger', 'exampleTrigger'),
+			...lumaPackage(
+				'@acme/n8n-nodes-luma.luma',
+				'@acme/n8n-nodes-luma.lumaTrigger',
+				'@acme/n8n-nodes-luma',
+			).trigger,
 		},
 		(() => {
-			const code = codex('n8n-nodes-example.example');
-			const filename = createPackage('n8n-nodes-example', {
-				'dist/nodes/Example/Example.node.json': code,
-				'dist/nodes/Example/Example.node.js': compiledNode('example'),
+			const code = codex('n8n-nodes-luma.lumaTrigger');
+			const file = createPackage('n8n-nodes-luma', ['dist/nodes/LumaTrigger/LumaTrigger.node.js'], {
+				'dist/nodes/LumaTrigger/LumaTrigger.node.js': compiledNode('LumaTrigger', 'lumaTrigger'),
+				'dist/nodes/LumaTrigger/LumaTrigger.node.json': code,
 			});
-			return { name: 'published package with a compiled node', filename, code };
+			return {
+				name: 'published package with a compiled node',
+				filename: file('dist/nodes/LumaTrigger/LumaTrigger.node.json'),
+				code,
+			};
 		})(),
 		(() => {
-			const code = codex('n8n-nodes-example.anything');
-			const filename = createPackage('n8n-nodes-example', {
-				'nodes/Example/Example.node.json': code,
+			const code = codex('n8n-nodes-luma');
+			const file = createPackage('n8n-nodes-luma', [], {
+				'nodes/Luma/Luma.node.ts': nodeSource('Luma', 'luma'),
+				'nodes/Luma/Luma.node.json': code,
 			});
-			return { name: 'only the package prefix is checked without a node file', filename, code };
+			return {
+				name: 'codex of a node missing from "n8n.nodes"',
+				filename: file('nodes/Luma/Luma.node.json'),
+				code,
+			};
+		})(),
+		(() => {
+			const code = codex('n8n-nodes-luma.anything');
+			const file = createPackage('n8n-nodes-luma', ['dist/nodes/Luma/Luma.node.js'], {
+				'nodes/Luma/Luma.node.json': code,
+			});
+			return {
+				name: 'only the package prefix is checked when the node file is missing',
+				filename: file('nodes/Luma/Luma.node.json'),
+				code,
+			};
 		})(),
 		{
 			name: 'unrelated JSON file',
 			filename: 'package.json',
-			code: codex('n8n-nodes-example'),
+			code: codex('n8n-nodes-luma'),
 		},
 	],
 	invalid: [
 		{
 			name: 'package name only',
-			...sourceCodex('n8n-nodes-example'),
+			...lumaPackage('n8n-nodes-luma', 'n8n-nodes-luma').trigger,
 			errors: [
 				{
 					messageId: 'wrongNode',
-					data: { actual: 'n8n-nodes-example', expected: 'n8n-nodes-example.example' },
+					data: { actual: 'n8n-nodes-luma', expected: 'n8n-nodes-luma.lumaTrigger' },
 				},
 			],
-			output: codex('n8n-nodes-example.example'),
+			output: codex('n8n-nodes-luma.lumaTrigger'),
 		},
 		{
 			name: 'scoped package name only',
-			...sourceCodex('@acme/n8n-nodes-example', 'example', '@acme/n8n-nodes-example'),
+			...lumaPackage('@acme/n8n-nodes-luma', '@acme/n8n-nodes-luma', '@acme/n8n-nodes-luma').action,
 			errors: [{ messageId: 'wrongNode' }],
-			output: codex('@acme/n8n-nodes-example.example'),
+			output: codex('@acme/n8n-nodes-luma.luma'),
 		},
 		{
 			name: 'trigger reusing the action node name',
-			...sourceCodex('n8n-nodes-example.example', 'exampleTrigger'),
+			...lumaPackage('n8n-nodes-luma.luma', 'n8n-nodes-luma.luma').trigger,
 			errors: [{ messageId: 'wrongNode' }],
-			output: codex('n8n-nodes-example.exampleTrigger'),
+			output: codex('n8n-nodes-luma.lumaTrigger'),
+		},
+		{
+			name: 'class name instead of the description name',
+			...lumaPackage('n8n-nodes-luma.Luma', 'n8n-nodes-luma.LumaTrigger').trigger,
+			errors: [{ messageId: 'wrongNode' }],
+			output: codex('n8n-nodes-luma.lumaTrigger'),
 		},
 		{
 			name: 'wrong package prefix',
-			...sourceCodex('n8n-nodes-other.example'),
+			...lumaPackage('n8n-nodes-other.luma', 'n8n-nodes-other.lumaTrigger').action,
 			errors: [{ messageId: 'wrongNode' }],
-			output: codex('n8n-nodes-example.example'),
+			output: codex('n8n-nodes-luma.luma'),
 		},
 		{
 			name: 'missing node field',
-			...sourceCodex(undefined),
-			errors: [{ messageId: 'missingNode', data: { expected: 'n8n-nodes-example.example' } }],
+			...lumaPackage(undefined, undefined).trigger,
+			errors: [{ messageId: 'missingNode', data: { expected: 'n8n-nodes-luma.lumaTrigger' } }],
 		},
 		(() => {
-			const code = codex('n8n-nodes-example');
-			const filename = createPackage('n8n-nodes-example', {
-				'nodes/Example/Example.node.json': code,
+			const code = codex('n8n-nodes-luma');
+			const file = createPackage('n8n-nodes-luma', ['dist/nodes/Luma/Luma.node.js'], {
+				'nodes/Luma/Luma.node.json': code,
 			});
 			return {
-				name: 'package name only without a node file',
-				filename,
+				name: 'package name only when the node file is missing',
+				filename: file('nodes/Luma/Luma.node.json'),
 				code,
 				errors: [{ messageId: 'wrongNode' as const }],
 				output: null,
@@ -163,51 +217,34 @@ ruleTester.run('codex-node-name', CodexNodeNameRule, {
 });
 
 describe('findNodeName', () => {
-	it('reads the description name, not the class or file name', () => {
-		const filename = createPackage('n8n-nodes-luma', {
-			'nodes/Luma/LumaTrigger.node.json': codex(),
-			'nodes/Luma/LumaTrigger.node.ts': `
-				import type { INodeType, INodeTypeDescription } from 'n8n-workflow';
-
-				export class LumaTrigger implements INodeType {
-					description: INodeTypeDescription = {
-						displayName: 'Luma Trigger',
-						name: 'lumaTrigger',
-						group: ['trigger'],
-						version: 1,
-						inputs: [],
-						outputs: ['main'],
-						properties: [],
-					};
-				}
-			`,
+	it('reads the description name, not the class name', () => {
+		const file = createPackage('n8n-nodes-luma', [], {
+			'LumaTrigger.node.ts': nodeSource('LumaTrigger', 'lumaTrigger'),
 		});
-		expect(findNodeName(filename)).toBe('lumaTrigger');
+		expect(findNodeName(file('LumaTrigger.node.ts'))).toBe('lumaTrigger');
 	});
 
 	it('reads the name from a versioned node base description', () => {
-		const filename = createPackage('n8n-nodes-example', {
-			'nodes/Example/Example.node.json': codex(),
-			'nodes/Example/Example.node.ts': `
-				export class Example extends VersionedNodeType {
+		const file = createPackage('n8n-nodes-luma', [], {
+			'Luma.node.ts': `
+				export class Luma extends VersionedNodeType {
 					constructor() {
-						const baseDescription = { displayName: 'Example', name: 'example', defaultVersion: 2 };
+						const baseDescription = { displayName: 'Luma', name: 'luma', defaultVersion: 2 };
 						super({}, baseDescription);
 					}
 				}
 			`,
 		});
-		expect(findNodeName(filename)).toBe('example');
+		expect(findNodeName(file('Luma.node.ts'))).toBe('luma');
 	});
 
 	it('ignores objects that are not a node description', () => {
-		const filename = createPackage('n8n-nodes-example', {
-			'nodes/Example/Example.node.json': codex(),
-			'nodes/Example/Example.node.ts': `
+		const file = createPackage('n8n-nodes-luma', [], {
+			'Luma.node.ts': `
 				const option = { name: 'Create', value: 'create' };
-				export class Example { description = { displayName: 'Example', name: 'example', version: 1 }; }
+				export class Luma { description = { displayName: 'Luma', name: 'luma', version: 1 }; }
 			`,
 		});
-		expect(findNodeName(filename)).toBe('example');
+		expect(findNodeName(file('Luma.node.ts'))).toBe('luma');
 	});
 });

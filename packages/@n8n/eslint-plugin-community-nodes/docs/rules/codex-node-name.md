@@ -10,7 +10,9 @@
 
 The `node` field in a node's `.node.json` codex file identifies the node it describes. It should be the package name and the node's `name` joined by a dot, the same format n8n's built-in nodes use (`n8n-nodes-base.github`, `n8n-nodes-base.githubTrigger`). Using only the package name gives a node and its trigger the same value.
 
-The rule reads the node's `name` from the node file next to the codex (`Example.node.ts`, or `Example.node.js` in a published package) and can fix the value. When there is no node file or its `name` isn't a plain string, it only checks that the value starts with the package name and a dot.
+The rule follows how n8n finds a codex: it takes each file in `n8n.nodes` in `package.json`, reads the node's `name` from its description, and checks the `.node.json` next to it. In a source checkout it reads the TypeScript source instead of the compiled file. It can fix the value. A codex that belongs to no registered node is skipped, and when the node file is missing or its `name` isn't a plain string, the rule only checks that the value starts with the package name and a dot.
+
+For example, with `"nodes": ["dist/nodes/LumaTrigger/LumaTrigger.node.js"]` in a package named `n8n-nodes-luma`, and `name: 'lumaTrigger'` in the node's description, `LumaTrigger.node.json` needs `"node": "n8n-nodes-luma.lumaTrigger"`.
 
 See [codex files](https://docs.n8n.io/connect/create-nodes/build-your-node/reference/codex-files).
 
@@ -20,7 +22,7 @@ See [codex files](https://docs.n8n.io/connect/create-nodes/build-your-node/refer
 
 ```json
 {
-  "node": "n8n-nodes-example"
+  "node": "n8n-nodes-luma"
 }
 ```
 
@@ -28,6 +30,6 @@ See [codex files](https://docs.n8n.io/connect/create-nodes/build-your-node/refer
 
 ```json
 {
-  "node": "n8n-nodes-example.example"
+  "node": "n8n-nodes-luma.lumaTrigger"
 }
 ```
