@@ -16,7 +16,17 @@ import { createComponentRenderer } from '@/__tests__/render';
 import { type MockedStore, mockedStore, SETTINGS_STORE_DEFAULT_STATE } from '@/__tests__/utils';
 import RunData from './RunData.vue';
 import { STORES } from '@n8n/stores';
-import { MODAL_CONFIRM, SET_NODE_TYPE, TRIMMED_RUN_DATA_FILL_DELAY } from '@/app/constants';
+import {
+	EnterpriseEditionFeature,
+	MODAL_CONFIRM,
+	SET_NODE_TYPE,
+	TRIMMED_RUN_DATA_FILL_DELAY,
+	VIEWS,
+} from '@/app/constants';
+import { useSettingsStore } from '@n8n/stores/settings.store';
+import { useWorkflowsListStore } from '@/app/stores/workflowsList.store';
+import { useSourceControlStore } from '@/features/integrations/sourceControl.ee/sourceControl.store';
+import { useCollaborationStore } from '@/features/collaboration/collaboration/collaboration.store';
 import { useAiSimulatedExecutionsStore } from '@/app/stores/aiSimulatedExecutions.store';
 import type { INodeUi, IRunDataDisplayMode } from '@/Interface';
 import type { IExecutionResponse } from '@/features/execution/executions/executions.types';
@@ -50,6 +60,11 @@ import {
 import { useWorkflowExecutionStateStore } from '@/app/stores/workflowExecutionState.store';
 
 const MOCK_EXECUTION_URL = 'execution.url/123';
+const route = vi.hoisted(() => ({
+	name: '',
+	meta: { readOnlyCanvas: false },
+	params: {},
+}));
 
 const { trackOpeningRelatedExecution, resolveRelatedExecutionUrl, runWorkflow, confirmMock } =
 	vi.hoisted(() => ({
@@ -70,7 +85,7 @@ vi.mock('vue-router', () => {
 				href: '',
 			})),
 		}),
-		useRoute: () => reactive({ meta: {}, params: {} }),
+		useRoute: () => reactive(route),
 		RouterLink: vi.fn(),
 	};
 });
@@ -104,11 +119,135 @@ describe('RunData', () => {
 		resolveRelatedExecutionUrl.mockReturnValue('execution.url/123');
 	});
 
+	beforeEach(() => {
+		route.name = VIEWS.WORKFLOW;
+		route.meta.readOnlyCanvas = false;
+	});
+
 	afterEach(async () => {
 		// The table view loads through defineAsyncComponent. Wait for that import
 		// so its image is not fetched after the test environment is torn down.
 		await flushPromises();
 		await vi.dynamicImportSettled();
+	});
+
+	describe('disabled pin tooltip', () => {
+		function allowCopyToEditor() {
+			mockedStore(useSettingsStore).isEnterpriseFeatureEnabled = {
+				[EnterpriseEditionFeature.DebugInEditor]: true,
+			};
+			useWorkflowsListStore().addWorkflow(
+				createTestWorkflow({ id: 'test-workflow', scopes: ['workflow:update'] }),
+			);
+		}
+
+		beforeEach(() => {
+			route.name = VIEWS.EXECUTION_PREVIEW;
+			route.meta.readOnlyCanvas = true;
+		});
+
+		it.each([
+			['success', 'Copy to editor'],
+			['error', 'Debug in editor'],
+		] as const)('shows the execution tooltip for %s with "%s" guidance', async (status, action) => {
+			const { getByTestId } = render({
+				displayMode: 'json',
+				executionStatus: status,
+				stubPinButton: false,
+			});
+			allowCopyToEditor();
+
+			await userEvent.hover(getByTestId('ndv-pin-data'));
+			await waitFor(() =>
+				expect(getByTestId('ndv-pin-data')).toHaveAccessibleDescription(
+					`This execution is read-only. Use ‘${action}’ to copy its data to the editor, where you can pin it.`,
+				),
+			);
+			expect(getByTestId('ndv-pin-data')).toHaveAttribute('aria-disabled', 'true');
+		});
+
+		it.each([
+			{
+				name: 'the Debug in editor feature is unavailable',
+				setup: () => {
+					mockedStore(useSettingsStore).isEnterpriseFeatureEnabled = {};
+				},
+			},
+			{
+				name: 'the user cannot edit the workflow',
+				setup: () => {
+					useWorkflowsListStore().updateWorkflowInCache('test-workflow', { scopes: [] });
+				},
+			},
+			{
+				name: 'the current workflow is archived',
+				setup: () => {
+					useWorkflowsListStore().updateWorkflowInCache('test-workflow', { isArchived: true });
+				},
+			},
+			{
+				name: 'the environment is read-only',
+				setup: () => {
+					useSourceControlStore().preferences.branchReadOnly = true;
+				},
+			},
+			{
+				name: 'another tab holds the write lock',
+				setup: () => {
+					mockedStore(useCollaborationStore).shouldBeReadOnly = true;
+				},
+			},
+		])('shows the execution read-only tooltip when $name', async ({ setup }) => {
+			const { getByTestId } = render({ displayMode: 'json', stubPinButton: false });
+			allowCopyToEditor();
+			setup();
+
+			await userEvent.hover(getByTestId('ndv-pin-data'));
+			await waitFor(() =>
+				expect(getByTestId('ndv-pin-data')).toHaveAccessibleDescription(
+					"This execution is read-only. You can't pin or unpin data here.",
+				),
+			);
+		});
+
+		it('shows the execution read-only tooltip when redacted data cannot be revealed', async () => {
+			const { getByTestId } = render({
+				displayMode: 'json',
+				stubPinButton: false,
+				// Pinned data keeps the pin button visible when execution data is redacted.
+				pinnedData: [{ json: { message: 'Pinned output' } }],
+				redactionInfo: { isRedacted: true, canReveal: false, reason: 'manual' },
+			});
+			allowCopyToEditor();
+
+			await userEvent.hover(getByTestId('ndv-pin-data'));
+			await waitFor(() =>
+				expect(getByTestId('ndv-pin-data')).toHaveAccessibleDescription(
+					"This execution is read-only. You can't pin or unpin data here.",
+				),
+			);
+		});
+
+		it.each(['route', 'viewer', 'archived', 'environment', 'collaboration'])(
+			'shows the workflow read-only tooltip outside executions: %s',
+			async (reason) => {
+				route.name = VIEWS.WORKFLOW;
+				route.meta.readOnlyCanvas = reason === 'route';
+				const { getByTestId, rerender } = render({ displayMode: 'json', stubPinButton: false });
+				if (reason === 'viewer') await rerender({ readOnly: true });
+				if (reason === 'archived') workflowDocumentStore.setIsArchived(true);
+				if (reason === 'environment') useSourceControlStore().preferences.branchReadOnly = true;
+				if (reason === 'collaboration') mockedStore(useCollaborationStore).shouldBeReadOnly = true;
+
+				await userEvent.hover(getByTestId('ndv-pin-data'));
+				await waitFor(() =>
+					expect(getByTestId('ndv-pin-data')).toHaveAccessibleDescription(
+						"You can't change pinned data while this workflow is read-only",
+					),
+				);
+				expect(getByTestId('ndv-pin-data')).toHaveAttribute('aria-disabled', 'true');
+			},
+		);
 	});
 
 	it("should render pin button in output panel disabled when there's binary data", () => {
@@ -2154,6 +2293,7 @@ describe('RunData', () => {
 		otherNodeRuns,
 		fetchedRunData,
 		inputNodes,
+		stubPinButton = true,
 	}: {
 		defaultRunItems?: INodeExecutionData[];
 		workflowId?: string;
@@ -2182,6 +2322,7 @@ describe('RunData', () => {
 		fetchedRunData?: IRunData;
 		/** The parent nodes that the input panel's schema view shows. */
 		inputNodes?: IConnectedNode[];
+		stubPinButton?: boolean;
 		lastSuccessfulExecution?: {
 			id: string;
 			finished: boolean;
@@ -2302,10 +2443,12 @@ describe('RunData', () => {
 					[WorkflowIdKey as unknown as string]: computed(() => workflowId ?? 'test-workflow'),
 				},
 				stubs: {
-					RunDataPinButton: {
-						template:
-							'<button data-test-id="ndv-pin-data" @click="$emit(\'togglePinData\')"></button>',
-					},
+					RunDataPinButton: stubPinButton
+						? {
+								template:
+									'<button data-test-id="ndv-pin-data" @click="$emit(\'togglePinData\')"></button>',
+							}
+						: false,
 					NodeErrorView: { template: '<div data-test-id="node-error-view"></div>' },
 					// Stub the async wrapper before Vue loads the schema module.
 					LazyRunDataSchema: {

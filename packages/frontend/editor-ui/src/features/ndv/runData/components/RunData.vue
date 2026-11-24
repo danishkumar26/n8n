@@ -33,6 +33,7 @@ import {
 	CORE_NODES_CATEGORY,
 	DATA_EDITING_DOCS_URL,
 	DATA_PINNING_DOCS_URL,
+	EnterpriseEditionFeature,
 	HTML_NODE_TYPE,
 	LOCAL_STORAGE_PIN_DATA_DISCOVERY_CANVAS_FLAG,
 	LOCAL_STORAGE_PIN_DATA_DISCOVERY_NDV_FLAG,
@@ -40,6 +41,7 @@ import {
 	MAX_DISPLAY_DATA_SIZE_SCHEMA_VIEW,
 	NODE_TYPES_EXCLUDED_FROM_OUTPUT_NAME_APPEND,
 	RUN_DATA_DEFAULT_PAGE_SIZE,
+	VIEWS,
 } from '@/app/constants';
 import { DUMMY_PIN_DATA } from '@/app/constants/samples';
 
@@ -64,6 +66,9 @@ import { injectNDVStore } from '@/features/ndv/shared/ndv.store';
 import { useAiSimulatedDataGuard } from '@/app/composables/useAiSimulatedDataGuard';
 import { useNodeTypesStore } from '@/app/stores/nodeTypes.store';
 import { useRootStore } from '@n8n/stores/useRootStore';
+import { useSettingsStore } from '@n8n/stores/settings.store';
+import { getResourcePermissions } from '@n8n/permissions';
+import { useWorkflowsListStore } from '@/app/stores/workflowsList.store';
 import { useSourceControlStore } from '@/features/integrations/sourceControl.ee/sourceControl.store';
 import { useCollaborationStore } from '@/features/collaboration/collaboration/collaboration.store';
 import { injectWorkflowExecutionStateStore } from '@/app/stores/workflowExecutionState.store';
@@ -249,6 +254,8 @@ const workflowDocumentStore = injectWorkflowDocumentStore();
 const sourceControlStore = useSourceControlStore();
 const collaborationStore = useCollaborationStore();
 const rootStore = useRootStore();
+const settingsStore = useSettingsStore();
+const workflowsListStore = useWorkflowsListStore();
 const schemaPreviewStore = useSchemaPreviewStore();
 
 const toast = useToast();
@@ -729,6 +736,38 @@ const showPinButton = computed(
 const pinButtonDisabled = computed(
 	() => hasNoData.value || hasBinaryData.value || isReadOnly.value,
 );
+
+const pinButtonDisabledTooltip = computed(() => {
+	if (route.name !== VIEWS.EXECUTION_PREVIEW) {
+		return i18n.baseText('ndv.pinData.disabled.readOnly');
+	}
+
+	const workflow = workflowsListStore.getWorkflowById(workflowId.value);
+	const redactionInfo = currentExecution.value?.data?.redactionInfo;
+	const canCopyToEditor =
+		currentExecution.value &&
+		settingsStore.isEnterpriseFeatureEnabled[EnterpriseEditionFeature.DebugInEditor] &&
+		getResourcePermissions(workflow?.scopes).workflow.update &&
+		!workflow?.isArchived &&
+		!isArchivedWorkflow.value &&
+		!readOnlyEnv.value &&
+		!collaborationStore.shouldBeReadOnly &&
+		!(redactionInfo?.isRedacted && !redactionInfo.canReveal);
+
+	if (!canCopyToEditor) {
+		return i18n.baseText('ndv.pinData.disabled.execution');
+	}
+
+	return i18n.baseText('ndv.pinData.disabled.executionWithEditorAction', {
+		interpolate: {
+			action: i18n.baseText(
+				currentExecution.value?.status === 'success'
+					? 'executionsList.debug.button.copyToEditor'
+					: 'executionsList.debug.button.debugInEditor',
+			),
+		},
+	});
+});
 
 const activeTaskMetadata = computed((): ITaskMetadata | null => {
 	if (!node.value) return null;
@@ -1694,6 +1733,7 @@ defineExpose({ enterEditMode });
 				<RunDataPinButton
 					v-if="showPinButton"
 					:disabled="pinButtonDisabled"
+					:disabled-tooltip="pinButtonDisabledTooltip"
 					:tooltip-contents-visibility="{
 						binaryDataTooltipContent: !!binaryData?.length,
 						pinDataDiscoveryTooltipContent:
