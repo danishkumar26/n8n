@@ -73,7 +73,7 @@ function isValidPackageJson(obj: unknown): obj is { n8n?: PackageJsonN8n } {
 	return typeof obj === 'object' && obj !== null;
 }
 
-function readPackageJsonRaw(packageJsonPath: string): Record<string, unknown> | null {
+export function readPackageJsonRaw(packageJsonPath: string): Record<string, unknown> | null {
 	try {
 		const content = readFileSync(packageJsonPath, 'utf8');
 		const parsed: unknown = JSON.parse(content);
@@ -83,7 +83,7 @@ function readPackageJsonRaw(packageJsonPath: string): Record<string, unknown> | 
 	}
 }
 
-function readPackageJsonN8n(packageJsonPath: string): PackageJsonN8n {
+export function readPackageJsonN8n(packageJsonPath: string): PackageJsonN8n {
 	const parsed = readPackageJsonRaw(packageJsonPath);
 	if (parsed) {
 		const n8n = parsed.n8n;

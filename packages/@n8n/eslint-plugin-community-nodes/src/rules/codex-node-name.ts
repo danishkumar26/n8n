@@ -6,8 +6,12 @@ import path from 'node:path';
 import {
 	createRule,
 	findJsonProperty,
+	findObjectProperty,
 	findPackageJson,
+	getStringLiteralValue,
 	getTopLevelObjectInJson,
+	readPackageJsonN8n,
+	readPackageJsonRaw,
 	readPackageJsonRegisteredFiles,
 	safeJoinPath,
 } from '../utils/index.js';
@@ -77,10 +81,7 @@ export const CodexNodeNameRule = createRule({
 				}
 
 				const { value } = property;
-				const actual =
-					value.type === AST_NODE_TYPES.Literal && typeof value.value === 'string'
-						? value.value
-						: null;
+				const actual = getStringLiteralValue(value);
 
 				const isValid = nodeName
 					? actual === expected
@@ -103,12 +104,8 @@ export const CodexNodeNameRule = createRule({
 });
 
 function readPackageName(packageJsonPath: string): string | null {
-	try {
-		const { name } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { name?: unknown };
-		return typeof name === 'string' && name.length > 0 ? name : null;
-	} catch {
-		return null;
-	}
+	const name = readPackageJsonRaw(packageJsonPath)?.name;
+	return typeof name === 'string' && name.length > 0 ? name : null;
 }
 
 /**
@@ -132,7 +129,7 @@ function findRegisteredNodeFile(
 		]),
 	);
 
-	for (const registeredPath of readRegisteredNodePaths(packageJsonPath)) {
+	for (const registeredPath of readPackageJsonN8n(packageJsonPath).nodes ?? []) {
 		const sourcePath = registeredPath.replace(/^dist\//, '');
 		const isThisCodex = [registeredPath, sourcePath].some(
 			(candidate) =>
@@ -143,19 +140,6 @@ function findRegisteredNodeFile(
 		}
 	}
 	return undefined;
-}
-
-function readRegisteredNodePaths(packageJsonPath: string): string[] {
-	try {
-		const { n8n } = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as {
-			n8n?: { nodes?: unknown };
-		};
-		return Array.isArray(n8n?.nodes)
-			? n8n.nodes.filter((entry): entry is string => typeof entry === 'string')
-			: [];
-	} catch {
-		return [];
-	}
 }
 
 /** Reads the `name` from a node file's description */
@@ -183,33 +167,13 @@ export function findNodeName(nodeFile: string): string | null {
  * `displayName`, and a `version`, `defaultVersion` or `properties`
  */
 function descriptionName(object: TSESTree.ObjectExpression): string | null {
-	const keys = new Map<string, TSESTree.Node>();
-	for (const property of object.properties) {
-		if (property.type !== AST_NODE_TYPES.Property || property.computed) {
-			continue;
-		}
-		const key =
-			property.key.type === AST_NODE_TYPES.Identifier
-				? property.key.name
-				: property.key.type === AST_NODE_TYPES.Literal
-					? String(property.key.value)
-					: null;
-		if (key) {
-			keys.set(key, property.value);
-		}
-	}
-
-	const name = keys.get('name');
 	const isDescription =
-		keys.has('displayName') &&
-		(keys.has('version') || keys.has('defaultVersion') || keys.has('properties'));
-	if (
-		!isDescription ||
-		name?.type !== AST_NODE_TYPES.Literal ||
-		typeof name.value !== 'string' ||
-		name.value.length === 0
-	) {
-		return null;
-	}
-	return name.value;
+		findObjectProperty(object, 'displayName') !== null &&
+		['version', 'defaultVersion', 'properties'].some(
+			(key) => findObjectProperty(object, key) !== null,
+		);
+	const name = isDescription
+		? getStringLiteralValue(findObjectProperty(object, 'name')?.value ?? null)
+		: null;
+	return name === '' ? null : name;
 }
