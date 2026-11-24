@@ -5,6 +5,7 @@ import { DataSource, In, Repository } from '@n8n/typeorm';
 import { BinaryDataFile } from '../entities';
 import type { SourceType } from '../entities';
 import { dbType } from '../entities/abstract-entity';
+import { chunkIds } from '../utils/chunk-ids';
 
 @Service()
 export class BinaryDataRepository extends Repository<BinaryDataFile> {
@@ -29,6 +30,23 @@ export class BinaryDataRepository extends Repository<BinaryDataFile> {
 		const file = await this.findOne({ where: { fileId }, select: ['sourceType', 'sourceId'] });
 
 		return file ? { sourceType: file.sourceType, sourceId: file.sourceId } : null;
+	}
+
+	/**
+	 * Moves the listed execution files from one source ID to another. A file that
+	 * holds a different source ID is left alone.
+	 */
+	async moveExecutionFilesToSourceId(
+		fileIds: string[],
+		fromSourceId: string,
+		toSourceId: string,
+	): Promise<void> {
+		for (const batch of chunkIds(fileIds)) {
+			await this.update(
+				{ fileId: In(batch), sourceType: 'execution', sourceId: fromSourceId },
+				{ sourceId: toSourceId },
+			);
+		}
 	}
 
 	async deleteByFileIds(fileIds: string[]): Promise<void> {
