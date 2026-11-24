@@ -163,6 +163,28 @@ ruleTester.run('codex-node-name', CodexNodeNameRule, {
 });
 
 describe('findNodeName', () => {
+	it('reads the description name, not the class or file name', () => {
+		const filename = createPackage('n8n-nodes-luma', {
+			'nodes/Luma/LumaTrigger.node.json': codex(),
+			'nodes/Luma/LumaTrigger.node.ts': `
+				import type { INodeType, INodeTypeDescription } from 'n8n-workflow';
+
+				export class LumaTrigger implements INodeType {
+					description: INodeTypeDescription = {
+						displayName: 'Luma Trigger',
+						name: 'lumaTrigger',
+						group: ['trigger'],
+						version: 1,
+						inputs: [],
+						outputs: ['main'],
+						properties: [],
+					};
+				}
+			`,
+		});
+		expect(findNodeName(filename)).toBe('lumaTrigger');
+	});
+
 	it('reads the name from a versioned node base description', () => {
 		const filename = createPackage('n8n-nodes-example', {
 			'nodes/Example/Example.node.json': codex(),
