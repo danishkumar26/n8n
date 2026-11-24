@@ -2663,6 +2663,7 @@ describe('Promotions in Public API', () => {
 				environmentId: selectionBody.expectedSource.environmentId,
 				git: { branchName: 'main', commitSha: selectionBody.expectedSource.commitSha },
 			});
+			// The first Apply accepts this body without `confirmMissingDependencies`.
 			const body = { ...selectionBody, confirmMissingDependencies: true };
 			const agent = testServer.publicApiAgentFor(owner);
 			try {
@@ -2670,6 +2671,7 @@ describe('Promotions in Public API', () => {
 				const continued = await agent.post('/promotions/projects/proj1/apply/continue').send(body);
 
 				expect(first.status, JSON.stringify(first.body)).toBe(400);
+				expect(JSON.stringify(first.body)).toContain('confirmMissingDependencies');
 				expect(initial).not.toHaveBeenCalled();
 				expect(continued.status, JSON.stringify(continued.body)).toBe(200);
 				expect(continuation).toHaveBeenCalledWith(
@@ -2919,11 +2921,8 @@ describe('Promotions in Public API', () => {
 				environmentId: id,
 				git: { branchName: 'main', commitSha: continueBody.expectedSource.commitSha },
 			});
-			const body = {
-				...continueBody,
-				confirmDestructiveChanges: true,
-				confirmMissingDependencies: true,
-			};
+			// The first Apply accepts this body without `confirmMissingDependencies`.
+			const body = { ...continueBody, confirmMissingDependencies: true };
 			try {
 				const first = await agent.post(`/promotions/environments/${id}/apply`).send(body);
 				const continued = await agent
@@ -2931,6 +2930,7 @@ describe('Promotions in Public API', () => {
 					.send(body);
 
 				expect(first.status, JSON.stringify(first.body)).toBe(400);
+				expect(JSON.stringify(first.body)).toContain('confirmMissingDependencies');
 				expect(initial).not.toHaveBeenCalled();
 				expect(continued.status, JSON.stringify(continued.body)).toBe(200);
 				expect(continuation).toHaveBeenCalledWith(
