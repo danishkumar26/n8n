@@ -15,6 +15,7 @@ import {
 	extractBuiltAgentArtifacts,
 	extractBuiltWorkflowArtifacts,
 	isStreamingTimelineEntry,
+	ACTIVITY_INDICATOR_DELAY_MS,
 	type ArtifactInfo,
 	type TimelineBlock,
 } from '../agentTimeline.utils';
@@ -32,6 +33,7 @@ import TimelineTextSegment from './TimelineTextSegment.vue';
 import { AiActivityTrace } from '../../shared/components/AiActivityTrace';
 import AiTypingIndicator from '../../shared/components/AiTypingIndicator.vue';
 import { useInstanceAiActivityItems } from '../composables/useInstanceAiActivityItems';
+import { useQuietPeriod } from '../composables/useQuietPeriod';
 
 const i18n = useI18n();
 const thread = useThread();
@@ -123,6 +125,22 @@ const preferencesEnabled = computed(() => isContextPreferencesEnabled());
 const timelineEntries = computed(() => props.visibleEntries ?? props.agentNode.timeline);
 
 const { activityItems } = useInstanceAiActivityItems(() => props.agentNode);
+
+/**
+ * Changes whenever the run visibly advances: a new run, a new timeline entry,
+ * or more text in the tail entry. The tail entry keeps its identity while it
+ * streams, so the entries alone cannot show progress.
+ */
+const progressToken = computed(() => {
+	const entries = timelineEntries.value;
+	const tail = entries.at(-1);
+	const tailSize =
+		tail && (tail.type === 'text' || tail.type === 'reasoning') ? tail.content.length : 0;
+	return `${thread.activeRunId}:${entries.length}:${tailSize}`;
+});
+
+/** Short pauses are normal, so the typing dots wait for a real silence. */
+const isQuiet = useQuietPeriod(() => progressToken.value, ACTIVITY_INDICATOR_DELAY_MS);
 
 /** Index tool calls by ID for O(1) lookup and proper reactivity tracking. */
 const toolCallsById = computed(() => {
@@ -364,7 +382,7 @@ function resolveAppBlueprint(tc: InstanceAiToolCallState): AppBlueprint | undefi
 
 					<!-- The run is live but a committed answer settled the block behind it -->
 					<AiTypingIndicator
-						v-else-if="block.type === 'activity' && !thread.isAwaitingConfirmation"
+						v-else-if="block.type === 'activity' && isQuiet && !thread.isAwaitingConfirmation"
 						:class="$style.typingIndicator"
 					/>
 
