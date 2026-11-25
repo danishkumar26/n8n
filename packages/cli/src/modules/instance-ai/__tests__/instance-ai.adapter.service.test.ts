@@ -64,15 +64,11 @@ import type {
 } from 'n8n-workflow';
 import {
 	AI_GATEWAY_MANAGED_TAG,
-	AI_ASSISTANT_AT_MENTIONS_FLAG,
-	CANVAS_NODE_CONTEXT_FLAG,
 	CONFIG_EVALUATIONS_FLAG,
 	INSTANCE_AI_CONVERSATION_HISTORY_FLAG,
 	INSTANCE_AI_APPROVAL_MODES_FLAG,
 	INSTANCE_AI_EMPTY_PREFERENCES_NOTE_FLAG,
 	INSTANCE_AI_NODE_USAGE_FLAG,
-	INSTANCE_ACTIVITY_CONTEXT_FLAG,
-	ASSISTANT_SKILLS_FLAG,
 	INSTANCE_AI_CONVERSATION_HISTORY_ENABLED_VARIANT,
 	INSTANCE_AI_DRAFT_WORKFLOW_PREVIEW_FLAG,
 	INSTANCE_AI_DRAFT_WORKFLOW_PREVIEW_ENABLED_VARIANT,
@@ -81,8 +77,6 @@ import {
 	INSTANCE_AI_CONCISE_STYLE_FLAG,
 	INSTANCE_AI_CONCISE_STYLE_ENABLED_VARIANT,
 	CONFIG_EVALUATIONS_ENABLED_VARIANT,
-	INSTANCE_AI_FOLDER_EXPLORATION_FLAG,
-	INSTANCE_AI_FOLDER_EXPLORATION_ENABLED_VARIANT,
 } from '@n8n/api-types';
 
 import { EngineV2ExecutionReader } from '@/executions/engine-v2-execution-reader.service';
@@ -8548,12 +8542,11 @@ describe('createNodeAdapter — n8n Connect annotations', () => {
 
 describe('resolveExperimentGates', () => {
 	const user = { id: 'user-1', createdAt: new Date() } as unknown as User;
-	const secondUser = mock<User>({ id: 'user-2', createdAt: new Date() });
 	const getFeatureFlagForInstance = vi.fn();
 
-	function stubContainer(flags: Record<string, string | boolean>, instanceFlag = false) {
+	function stubContainer(flags: Record<string, string | boolean>) {
 		const getFeatureFlags = vi.fn().mockResolvedValue(flags);
-		getFeatureFlagForInstance.mockReset().mockResolvedValue(instanceFlag);
+		getFeatureFlagForInstance.mockReset();
 		vi.spyOn(Container, 'get').mockReturnValue({ getFeatureFlags, getFeatureFlagForInstance });
 		return getFeatureFlags;
 	}
@@ -8569,8 +8562,6 @@ describe('resolveExperimentGates', () => {
 		[INSTANCE_AI_CONCISE_STYLE_FLAG]: INSTANCE_AI_CONCISE_STYLE_ENABLED_VARIANT,
 		[INSTANCE_AI_SETUP_PANEL_FLAG]: INSTANCE_AI_SETUP_PANEL_ENABLED_VARIANT,
 		[INSTANCE_AI_NODE_USAGE_FLAG]: true,
-		[AI_ASSISTANT_AT_MENTIONS_FLAG]: true,
-		[INSTANCE_AI_FOLDER_EXPLORATION_FLAG]: INSTANCE_AI_FOLDER_EXPLORATION_ENABLED_VARIANT,
 		[INSTANCE_AI_APPROVAL_MODES_FLAG]: true,
 	};
 
@@ -8589,56 +8580,12 @@ describe('resolveExperimentGates', () => {
 			nodeContextEnabled: true,
 			folderExplorationEnabled: true,
 			approvalModesEnabled: true,
-			instanceContextEnabled: false,
-			assistantSkillsEnabled: false,
+			instanceContextEnabled: true,
+			assistantSkillsEnabled: true,
 		});
 		expect(getFeatureFlags).toHaveBeenCalledTimes(1);
 		expect(getFeatureFlags).toHaveBeenCalledWith(user);
-	});
-
-	it.each([true, false])(
-		'returns instance activity %s for users with different user flags',
-		async (instanceFlag) => {
-			const getFeatureFlags = stubContainer({}, instanceFlag);
-			getFeatureFlags
-				.mockResolvedValueOnce({
-					[INSTANCE_ACTIVITY_CONTEXT_FLAG]: true,
-					[INSTANCE_AI_NODE_USAGE_FLAG]: true,
-				})
-				.mockResolvedValueOnce({
-					[INSTANCE_ACTIVITY_CONTEXT_FLAG]: false,
-					[INSTANCE_AI_NODE_USAGE_FLAG]: false,
-				});
-			const adapter = createAdapter();
-
-			const [first, second] = await Promise.all([
-				adapter.resolveExperimentGates(user),
-				adapter.resolveExperimentGates(secondUser),
-			]);
-
-			expect(first.instanceContextEnabled).toBe(instanceFlag);
-			expect(second.instanceContextEnabled).toBe(instanceFlag);
-			expect(first.nodeUsageEnabled).toBe(true);
-			expect(second.nodeUsageEnabled).toBe(false);
-			expect(getFeatureFlagForInstance.mock.calls).toEqual([
-				[INSTANCE_ACTIVITY_CONTEXT_FLAG],
-				[ASSISTANT_SKILLS_FLAG],
-				[INSTANCE_ACTIVITY_CONTEXT_FLAG],
-				[ASSISTANT_SKILLS_FLAG],
-			]);
-		},
-	);
-
-	it.each([true, false])('reads Assistant skills %s from its instance flag', async (enabled) => {
-		stubContainer({});
-		getFeatureFlagForInstance.mockImplementation(
-			async (flag: string) => flag === ASSISTANT_SKILLS_FLAG && enabled,
-		);
-
-		await expect(createAdapter().resolveExperimentGates(user)).resolves.toMatchObject({
-			assistantSkillsEnabled: enabled,
-			instanceContextEnabled: false,
-		});
+		expect(getFeatureFlagForInstance).not.toHaveBeenCalled();
 	});
 
 	it.each([true, false])(
@@ -8662,24 +8609,16 @@ describe('resolveExperimentGates', () => {
 		},
 	);
 
-	it('keeps instance activity off when its evaluation fails', async () => {
-		stubContainer(allEnabled, true);
-		getFeatureFlagForInstance.mockRejectedValue(new Error('PostHog failed'));
-
-		await expect(createAdapter().resolveExperimentGates(user)).resolves.toMatchObject({
-			instanceContextEnabled: false,
-			nodeUsageEnabled: true,
-		});
-	});
-
-	it('keeps the instance answer when user flag evaluation fails', async () => {
-		const getFeatureFlags = stubContainer(allEnabled, true);
+	it('keeps the shipped surfaces on when user flag evaluation fails', async () => {
+		const getFeatureFlags = stubContainer(allEnabled);
 		getFeatureFlags.mockRejectedValue(new Error('PostHog failed'));
 
 		await expect(createAdapter().resolveExperimentGates(user)).resolves.toMatchObject({
 			instanceContextEnabled: true,
 			nodeUsageEnabled: false,
-			nodeContextEnabled: false,
+			nodeContextEnabled: true,
+			folderExplorationEnabled: true,
+			assistantSkillsEnabled: true,
 		});
 	});
 
@@ -8691,17 +8630,6 @@ describe('resolveExperimentGates', () => {
 		});
 	});
 
-	it.each([CANVAS_NODE_CONTEXT_FLAG, AI_ASSISTANT_AT_MENTIONS_FLAG])(
-		'enables node context with %s',
-		async (flag) => {
-			stubContainer({ [flag]: true });
-
-			await expect(createAdapter().resolveExperimentGates(user)).resolves.toMatchObject({
-				nodeContextEnabled: true,
-			});
-		},
-	);
-
 	it('disables experiment gates for control variants', async () => {
 		stubContainer({
 			[CONFIG_EVALUATIONS_FLAG]: 'control',
@@ -8710,9 +8638,6 @@ describe('resolveExperimentGates', () => {
 			[INSTANCE_AI_CONCISE_STYLE_FLAG]: 'control',
 			[INSTANCE_AI_SETUP_PANEL_FLAG]: 'control',
 			[INSTANCE_AI_NODE_USAGE_FLAG]: false,
-			[CANVAS_NODE_CONTEXT_FLAG]: false,
-			[AI_ASSISTANT_AT_MENTIONS_FLAG]: false,
-			[INSTANCE_AI_FOLDER_EXPLORATION_FLAG]: 'control',
 		});
 
 		await expect(createAdapter().resolveExperimentGates(user)).resolves.toEqual({
@@ -8724,11 +8649,11 @@ describe('resolveExperimentGates', () => {
 			setupPanelEnabled: false,
 			setupPanelVariant: 'control',
 			nodeUsageEnabled: false,
-			nodeContextEnabled: false,
-			folderExplorationEnabled: false,
+			nodeContextEnabled: true,
+			folderExplorationEnabled: true,
 			approvalModesEnabled: false,
-			instanceContextEnabled: false,
-			assistantSkillsEnabled: false,
+			instanceContextEnabled: true,
+			assistantSkillsEnabled: true,
 		});
 	});
 
@@ -8747,14 +8672,6 @@ describe('resolveExperimentGates', () => {
 	// Regression guard for the shipped bug: the flag is multivariate, so a
 	// boolean `true` is not a value PostHog can return for it. Reading it as one
 	// left the gate shut at every rollout percentage.
-	it('does not open the folder-exploration gate on a boolean true', async () => {
-		stubContainer({ ...allEnabled, [INSTANCE_AI_FOLDER_EXPLORATION_FLAG]: true });
-
-		await expect(createAdapter().resolveExperimentGates(user)).resolves.toMatchObject({
-			folderExplorationEnabled: false,
-		});
-	});
-
 	it('does not open the concise style gate on a boolean true', async () => {
 		stubContainer({ ...allEnabled, [INSTANCE_AI_CONCISE_STYLE_FLAG]: true });
 
@@ -8782,11 +8699,11 @@ describe('resolveExperimentGates', () => {
 			conciseStyleEnabled: false,
 			setupPanelEnabled: false,
 			nodeUsageEnabled: false,
-			nodeContextEnabled: false,
-			folderExplorationEnabled: false,
+			nodeContextEnabled: true,
+			folderExplorationEnabled: true,
 			approvalModesEnabled: false,
-			instanceContextEnabled: false,
-			assistantSkillsEnabled: false,
+			instanceContextEnabled: true,
+			assistantSkillsEnabled: true,
 		});
 	});
 
@@ -8802,11 +8719,11 @@ describe('resolveExperimentGates', () => {
 			conciseStyleEnabled: false,
 			setupPanelEnabled: false,
 			nodeUsageEnabled: false,
-			nodeContextEnabled: false,
-			folderExplorationEnabled: false,
+			nodeContextEnabled: true,
+			folderExplorationEnabled: true,
 			approvalModesEnabled: false,
-			instanceContextEnabled: false,
-			assistantSkillsEnabled: false,
+			instanceContextEnabled: true,
+			assistantSkillsEnabled: true,
 		});
 	});
 });
