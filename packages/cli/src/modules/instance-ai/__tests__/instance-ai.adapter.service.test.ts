@@ -125,9 +125,11 @@ function globalConfigStub(
 		queueMode?: boolean;
 		maxExecutionTimeout?: number;
 		diagnosticsEnabled?: boolean;
+		activityLogEnabled?: boolean;
 	} = {},
 ): ConstructorParameters<typeof InstanceAiAdapterService>[1] {
 	return {
+		activityLog: { enabled: overrides.activityLogEnabled ?? true },
 		ai: { allowSendingParameterValues: overrides.allowSendingParameterValues ?? false },
 		diagnostics: { enabled: overrides.diagnosticsEnabled ?? false },
 		executions: {
@@ -6856,6 +6858,7 @@ function createAdapterWithGatewayMock(
 		aiPreferenceService?: unknown;
 		logger?: unknown;
 		diagnosticsEnabled?: boolean;
+		activityLogEnabled?: boolean;
 	},
 ): InstanceAiAdapterService {
 	const aiGatewayService = {
@@ -6875,7 +6878,10 @@ function createAdapterWithGatewayMock(
 		warn: vi.fn(),
 		scoped: vi.fn().mockReturnThis(),
 	}) as unknown as ConstructorParameters<typeof InstanceAiAdapterService>[0];
-	args[1] = globalConfigStub({ diagnosticsEnabled: overrides?.diagnosticsEnabled });
+	args[1] = globalConfigStub({
+		diagnosticsEnabled: overrides?.diagnosticsEnabled,
+		activityLogEnabled: overrides?.activityLogEnabled,
+	});
 	if (overrides?.credentialsService) {
 		args[8] = overrides.credentialsService as unknown as ConstructorParameters<
 			typeof InstanceAiAdapterService
@@ -8677,6 +8683,16 @@ describe('resolveExperimentGates', () => {
 
 		await expect(createAdapter().resolveExperimentGates(user)).resolves.toMatchObject({
 			conciseStyleEnabled: false,
+		});
+	});
+
+	it('closes the instance context gate while the activity log is off', async () => {
+		stubContainer(allEnabled);
+
+		const adapter = createAdapterWithGatewayMock(vi.fn(), { activityLogEnabled: false });
+
+		await expect(adapter.resolveExperimentGates(user)).resolves.toMatchObject({
+			instanceContextEnabled: false,
 		});
 	});
 
