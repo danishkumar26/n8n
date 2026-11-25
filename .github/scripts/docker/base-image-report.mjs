@@ -4,9 +4,9 @@
  *
  * The script resolves each release line to its version from the Git tags, then
  * scans each variant of that version and the nightly image of the same variant
- * for fixable OS findings, on each platform. Each High or Critical
- * finding gets the status of its fix (see statusOf), from the result of the
- * refresh run in base-image-candidates.mjs.
+ * for fixable OS findings, on each platform. Each finding gets the status of
+ * its fix (see statusOf), from the result of the refresh run in
+ * base-image-candidates.mjs.
  *
  * Usage: node base-image-report.mjs --candidates <json> --out <dir>
  * Needs git, docker buildx and trivy. Writes one JSON for each image to --out, and
@@ -28,7 +28,7 @@ import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 
 import { DAILY_BRANCH, REVIEW_BRANCH, collectPullRequests } from './base-image-alerts.mjs';
-import { PLATFORMS, scan } from './base-image-candidates.mjs';
+import { PLATFORMS, SEVERITIES, scan } from './base-image-candidates.mjs';
 import { resolveDigest } from './base-image-chain-pr.mjs';
 
 /**
@@ -65,10 +65,6 @@ export const IMAGES = [
 		sources: ['DISTROLESS_BASE_IMAGE', 'DEBIAN_PYTHON_IMAGE'],
 	},
 ];
-
-/** The severities that get a status. The report also lists the Medium findings. */
-const STATUS_SEVERITIES = new Set(['CRITICAL', 'HIGH']);
-const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM'];
 
 const keyOf = (finding) => `${finding.id} ${finding.pkg}`;
 
@@ -128,15 +124,14 @@ export function buildReport({ line, version, image, ref, nightlyRef, scans, ...c
 	const list = [...findings.values()]
 		.sort(
 			(a, b) =>
-				SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity) ||
+				SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) ||
 				a.id.localeCompare(b.id) ||
 				a.pkg.localeCompare(b.pkg),
 		)
-		.map((finding) =>
-			STATUS_SEVERITIES.has(finding.severity)
-				? { ...finding, ...statusOf(keyOf(finding), image, { ...context, nightlyKeys }) }
-				: finding,
-		);
+		.map((finding) => ({
+			...finding,
+			...statusOf(keyOf(finding), image, { ...context, nightlyKeys }),
+		}));
 	return { line, version, image: ref, nightly: nightlyRef, findings: list };
 }
 
@@ -147,8 +142,8 @@ export function renderSummary(reports) {
 	const lines = [
 		'## Trivy report of the released images',
 		'',
-		'| Line | Image | Critical | High | Medium | Status of the High and Critical findings |',
-		'| --- | --- | --- | --- | --- | --- |',
+		'| Line | Image | Critical | High | Medium | Low | Unknown | Status of the findings |',
+		'| --- | --- | --- | --- | --- | --- | --- | --- |',
 	];
 	for (const report of reports) {
 		const statuses = new Map();
@@ -157,7 +152,7 @@ export function renderSummary(reports) {
 		}
 		const status = [...statuses].map(([name, n]) => `${name}: ${n}`).join(', ') || '-';
 		lines.push(
-			`| ${report.line} | \`${report.image.split('@')[0]}\` | ${count(report, 'CRITICAL')} | ${count(report, 'HIGH')} | ${count(report, 'MEDIUM')} | ${status} |`,
+			`| ${report.line} | \`${report.image.split('@')[0]}\` | ${count(report, 'CRITICAL')} | ${count(report, 'HIGH')} | ${count(report, 'MEDIUM')} | ${count(report, 'LOW')} | ${count(report, 'UNKNOWN')} | ${status} |`,
 		);
 	}
 	return `${lines.join('\n')}\n`;

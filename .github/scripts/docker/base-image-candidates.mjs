@@ -53,6 +53,13 @@ export function readPin(hcl, name) {
 	return { name, ref: match[1], ...ref.groups };
 }
 
+/**
+ * The severities that Trivy gives, the most severe first. The scans keep every
+ * fixable finding: each scanner takes the severity from another source, so a
+ * finding that Trivy rates Low can be High in another scanner.
+ */
+export const SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'];
+
 /** Reduces a Trivy JSON report to the fixable findings and the installed package names. */
 export function summarizeReport(report) {
 	const findings = new Map();
@@ -175,8 +182,6 @@ export function scan(ref, platform, workDir) {
 			'--pkg-types',
 			'os',
 			'--ignore-unfixed',
-			'--severity',
-			'CRITICAL,HIGH,MEDIUM',
 			'--list-all-pkgs',
 			'--format',
 			'json',
@@ -191,7 +196,7 @@ export function scan(ref, platform, workDir) {
 
 const count = (findings) => {
 	const by = (severity) => findings.filter((finding) => finding.severity === severity).length;
-	return `${by('CRITICAL')} C / ${by('HIGH')} H / ${by('MEDIUM')} M`;
+	return `${by('CRITICAL')} C / ${by('HIGH')} H / ${by('MEDIUM')} M / ${by('LOW')} L / ${by('UNKNOWN')} U`;
 };
 
 /** A Markdown table of the results for the job summary. */

@@ -130,14 +130,14 @@ describe('buildReport', () => {
 			nightly: nightly ? { findings: nightly, packages: [] } : null,
 		}));
 
-	it('lists each finding once with its platforms, the most severe first', () => {
+	it('lists each finding once with its platforms and status, the most severe first', () => {
 		const report = buildReport({
 			line: 'stable',
 			version: '2.48.8',
 			image: n8n,
 			ref: 'n8nio/n8n:2.48.8@sha256:a',
 			nightlyRef: 'n8nio/n8n:nightly@sha256:b',
-			scans: scans([finding('CVE-2', 'MEDIUM'), finding('CVE-1', 'CRITICAL')], []),
+			scans: scans([finding('CVE-2', 'LOW'), finding('CVE-1', 'CRITICAL')], []),
 			results: [],
 			prs,
 			runUrl,
@@ -146,7 +146,7 @@ describe('buildReport', () => {
 			report.findings.map((f) => `${f.severity} ${f.id} ${f.platforms.join('+')} ${f.status}`),
 			[
 				'CRITICAL CVE-1 linux/amd64+linux/arm64 fix-merged',
-				'MEDIUM CVE-2 linux/amd64+linux/arm64 undefined',
+				'LOW CVE-2 linux/amd64+linux/arm64 fix-merged',
 			],
 		);
 	});
@@ -254,10 +254,13 @@ describe('renderSummary', () => {
 				findings: [
 					{ ...finding('CVE-1', 'HIGH'), status: 'pr-open' },
 					{ ...finding('CVE-2', 'HIGH'), status: 'pr-open' },
-					finding('CVE-3', 'MEDIUM'),
+					{ ...finding('CVE-3', 'LOW'), status: 'no-upstream-fix' },
 				],
 			},
 		]);
-		assert.match(summary, /\| stable \| `n8nio\/n8n:2\.48\.8` \| 0 \| 2 \| 1 \| pr-open: 2 \|/);
+		assert.match(
+			summary,
+			/\| stable \| `n8nio\/n8n:2\.48\.8` \| 0 \| 2 \| 0 \| 1 \| 0 \| pr-open: 2, no-upstream-fix: 1 \|/,
+		);
 	});
 });
