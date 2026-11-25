@@ -1256,6 +1256,7 @@ describe('SettingsSkillsView', () => {
 	describe('edit', () => {
 		it.each([
 			['instance', true, false, false],
+			['instance', true, true, true],
 			['project', true, true, true],
 			['project', false, true, undefined],
 		] as const)(
