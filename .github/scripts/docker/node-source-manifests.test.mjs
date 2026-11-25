@@ -25,7 +25,7 @@ function context(overrides = {}) {
 		'github.repository_owner': 'n8n-io',
 		'matrix.image.repo': 'node-patched',
 		'env.REPO': 'node-patched',
-		'env.NODE_VERSION': '26.13.0',
+		'env.NODE_VERSION': '26.13.1',
 		'github.sha': 'commit',
 		'github.run_id': '100',
 		'github.run_attempt': '2',
@@ -105,7 +105,7 @@ describe('Node source image manifests', () => {
 	for (const repository of repositories) {
 		for (const stage of ['', '-dev']) {
 			for (const arch of ['amd64', 'arm64']) {
-				const missingImage = `${repository}:26.13.0-commit-100-2${stage}-${arch}`;
+				const missingImage = `${repository}:26.13.1-commit-100-2${stage}-${arch}`;
 				it(`keeps all tags unchanged when ${missingImage} is missing`, () => {
 					const result = publish({ missingImage });
 					assert.notEqual(result.status, 0, result.stderr);
@@ -142,8 +142,8 @@ describe('Node source image manifests', () => {
 			.map((line) => line.slice('create '.length));
 		const expectedTags = repositories.flatMap((repository) =>
 			['', '-dev'].flatMap((stage) => [
-				`${repository}:26.13.0${stage}`,
-				`${repository}:26.13.0-commit${stage}`,
+				`${repository}:26.13.1${stage}`,
+				`${repository}:26.13.1-commit${stage}`,
 			]),
 		);
 		assert.deepEqual(createdTags.sort(), expectedTags.sort());
